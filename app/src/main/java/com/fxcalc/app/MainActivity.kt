@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -82,6 +83,10 @@ class MainActivity : AppCompatActivity() {
 
 class CalcBridge(private val db: CalcDatabaseHelper, private val activity: MainActivity) {
 
+    companion object {
+        private const val TAG = "FXCalcBridge"
+    }
+
     @JavascriptInterface
     fun saveCalc(name: String, data: String): Boolean {
         return try {
@@ -135,26 +140,61 @@ class CalcBridge(private val db: CalcDatabaseHelper, private val activity: MainA
 
     @JavascriptInterface
     fun fetchQuote(): String {
-        return try {
-            val url = URL("https://ntprogress.ru/local_api/public/east/")
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.connectTimeout = 5000
-            conn.readTimeout = 5000
-            conn.setRequestProperty("Accept", "application/json")
-            conn.setRequestProperty("Cache-Control", "no-cache")
+        // Endpoint redirects from /east/ to /east — call the final URL directly
+        return doFetch("https://ntprogress.ru/local_api/public/east")
+    }
+
+    private fun doFetch(urlString: String): String {
+        val startTime = System.currentTimeMillis()
+        var conn: HttpURLConnection? = null
+        try {
+            Log.d(TAG, "fetchQuote: starting request to $urlString")
+            val url = URL(urlString)
+            conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 8000
+                readTimeout = 8000
+                instanceFollowRedirects = true
+                useCaches = false
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("Cache-Control", "no-cache")
+                setRequestProperty("User-Agent", "FXCalculator/2.0 (Android)")
+                setRequestProperty("Connection", "close")
+            }
 
             val code = conn.responseCode
+            val elapsed = System.currentTimeMillis() - startTime
+            Log.d(TAG, "fetchQuote: response code $code in ${elapsed}ms")
+
+            // Handle redirects manually if instanceFollowRedirects didn't work
+            if (code in 300..399) {
+                val location = conn.getHeaderField("Location")
+                if (location != null && location != urlString) {
+                    Log.d(TAG, "fetchQuote: following redirect to $location")
+                    conn.disconnect()
+                    return doFetch(location)
+                }
+            }
+
             if (code != 200) {
-                conn.disconnect()
+                val errBody = try {
+                    conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                } catch (e: Exception) { "" }
+                Log.e(TAG, "fetchQuote: HTTP $code — $errBody")
                 return """{"error":"HTTP $code"}"""
             }
 
             val body = conn.inputStream.bufferedReader().use { it.readText() }
-            conn.disconnect()
-            body
+            val totalElapsed = System.currentTimeMillis() - startTime
+            Log.d(TAG, "fetchQuote: ${body.length} bytes received in ${totalElapsed}ms total")
+            return body
         } catch (e: Exception) {
-            """{"error":"${e.message?.replace("\"", "'") ?: "network error"}"}"""
+            val elapsed = System.currentTimeMillis() - startTime
+            Log.e(TAG, "fetchQuote: failed after ${elapsed}ms — ${e.javaClass.simpleName}: ${e.message}", e)
+            val msg = "${e.javaClass.simpleName}: ${e.message ?: "unknown"}".replace("\"", "'")
+            return """{"error":"$msg"}"""
+        } finally {
+            try { conn?.disconnect() } catch (_: Exception) {}
         }
     }
 }

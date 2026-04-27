@@ -78,7 +78,7 @@
   @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
   .live-row.error{background:rgba(255,69,58,0.08);border-color:rgba(255,69,58,0.25)}
   .live-row.error .live-label{color:var(--rd)}
-  .live-row.error .live-quote{color:var(--rd)}
+  .live-row.error .live-quote{color:var(--rd);font-size:10px;font-weight:500}
 
   .save-panel{display:none;background:var(--card);border-radius:10px;padding:10px;border:1px solid var(--dv)}
   .save-panel.show{display:block}
@@ -345,12 +345,11 @@
   // ---- LIVE QUOTE FETCH ----
   window.fxBid = null;
   window.fxAsk = null;
+  window.lastFetchError = null;
 
   function parseQuoteTime(iso){
-    // "2026-04-24 15:15:59.623000+00:00" -> "HH:MM:SS" in local time
     try {
       var s = (iso||'').replace(' ','T');
-      // Strip microseconds beyond milliseconds (JS can't parse 6-digit fraction)
       s = s.replace(/(\.\d{3})\d+/,'$1');
       var dt = new Date(s);
       if(isNaN(dt.getTime())) return '';
@@ -405,18 +404,28 @@
   }
 
   window.fetchUsdRub = async function(){
+    var errors = [];
     try {
       var row;
-      // Try Android bridge first (avoids CORS), fall back to direct fetch
       if(window.Android && window.Android.fetchQuote){
-        try { row = await fetchUsdRubBridge(); }
-        catch(e){ row = await fetchUsdRubDirect(); }
+        try {
+          row = await fetchUsdRubBridge();
+        } catch(e){
+          errors.push("bridge: "+(e.message||e));
+          try {
+            row = await fetchUsdRubDirect();
+          } catch(e2){
+            errors.push("direct: "+(e2.message||e2));
+            throw new Error(errors.join(" | "));
+          }
+        }
       } else {
         row = await fetchUsdRubDirect();
       }
 
       window.fxBid = row.bid;
       window.fxAsk = row.offer;
+      window.lastFetchError = null;
 
       return {
         bid: row.bid,
@@ -428,6 +437,7 @@
       };
     } catch(e){
       console.error("fetchUsdRub failed:", e);
+      window.lastFetchError = e.message || String(e);
       return null;
     }
   };
@@ -436,7 +446,10 @@
     var liveRow = g('liveRow');
     if(!result){
       liveRow.classList.add('error');
-      g('liveQuote').textContent = 'fetch failed';
+      var errMsg = window.lastFetchError ? ('fail: '+window.lastFetchError) : 'fetch failed';
+      if(errMsg.length > 80) errMsg = errMsg.substring(0,77)+'...';
+      g('liveQuote').textContent = errMsg;
+      g('liveQuote').title = window.lastFetchError || '';
       g('liveTime').textContent = '';
       return;
     }
@@ -446,7 +459,6 @@
   }
 
   function fillInitialRates(result){
-    // Only on app load — populate fw / q / mu from ask
     if(!result) return;
     var ask = result.ask;
     var fwVal = ask;
@@ -815,8 +827,6 @@
   });
 
   formatRub();
-  // Initial fetch fills rates; calc is triggered inside fillInitialRates
-  // If fetch fails, fields stay empty and calc shows dashes
   initialFetch();
 })();
 </script>
