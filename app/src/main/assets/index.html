@@ -84,6 +84,10 @@
   .live-row.error .live-label{color:var(--rd)}
   .live-row.error .live-status{color:var(--rd);font-size:10px;font-weight:500}
 
+  .live-row.market-closed{background:rgba(232,162,58,0.08);border-color:rgba(232,162,58,0.3)}
+  .live-row.market-closed .live-label{color:var(--am)}
+  .live-row.market-closed .live-status{color:var(--am);font-size:11px;font-weight:600}
+
   .save-panel{display:none;background:var(--card);border-radius:10px;padding:10px;border:1px solid var(--dv)}
   .save-panel.show{display:block}
   .sp-title{font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
@@ -402,20 +406,26 @@
         pending.reject(new Error('no data array (got ' + typeof payload.data + ')'));
         return;
       }
+      if(payload.data.length === 0){
+        pending.resolve({ marketClosed: true, reason: 'no quotes available' });
+        return;
+      }
       var row = payload.data.find(function(q){return q && q.name === 'USD/RUB_TOM'});
       if(!row){
-        var names = payload.data.map(function(q){return q && q.name}).join(',');
-        pending.reject(new Error('USD/RUB_TOM not found. Got: ' + names));
+        pending.resolve({ marketClosed: true, reason: 'USD/RUB_TOM not listed' });
         return;
       }
-      // Validate fields
+      // Check for missing fields (market closed scenario)
+      if(row.bid === undefined || row.bid === null || row.offer === undefined || row.offer === null){
+        pending.resolve({ marketClosed: true, reason: 'market closed', quote_time: row.creationDateTime });
+        return;
+      }
       var bid = parseFloat(row.bid);
       var ask = parseFloat(row.offer);
-      if(isNaN(bid) || isNaN(ask)){
-        pending.reject(new Error('invalid bid/offer: bid=' + row.bid + ' offer=' + row.offer));
+      if(isNaN(bid) || isNaN(ask) || bid === 0 || ask === 0){
+        pending.resolve({ marketClosed: true, reason: 'market closed', quote_time: row.creationDateTime });
         return;
       }
-      // Replace with parsed numbers so toFixed always works
       row.bid = bid;
       row.offer = ask;
       pending.resolve(row);
@@ -481,6 +491,14 @@
         row = await fetchUsdRubDirect();
       }
 
+      // Pass through market-closed marker
+      if(row && row.marketClosed){
+        window.fxBid = null;
+        window.fxAsk = null;
+        window.lastFetchError = null;
+        return { marketClosed: true, reason: row.reason || 'market closed', quote_time: row.quote_time };
+      }
+
       window.fxBid = row.bid;
       window.fxAsk = row.offer;
       window.lastFetchError = null;
@@ -502,6 +520,9 @@
 
   function showQuote(result){
     var liveRow = g('liveRow');
+    liveRow.classList.remove('error');
+    liveRow.classList.remove('market-closed');
+
     if(!result){
       liveRow.classList.add('error');
       var errMsg = window.lastFetchError ? ('fail: ' + window.lastFetchError) : 'fetch failed';
@@ -513,8 +534,16 @@
       g('liveTime').textContent = '';
       return;
     }
+    if(result.marketClosed){
+      liveRow.classList.add('market-closed');
+      g('liveStatus').style.display = '';
+      g('liveQuote').style.display = 'none';
+      g('liveStatus').textContent = 'Market closed';
+      g('liveStatus').title = result.reason || '';
+      g('liveTime').textContent = result.quote_time ? parseQuoteTime(result.quote_time) : '';
+      return;
+    }
     try {
-      liveRow.classList.remove('error');
       var bidStr = (typeof result.bid === 'number' ? result.bid.toFixed(4) : String(result.bid));
       var askStr = (typeof result.ask === 'number' ? result.ask.toFixed(4) : String(result.ask));
       g('liveStatus').style.display = 'none';
@@ -568,7 +597,8 @@
     var result = await window.fetchUsdRub();
     btn.classList.remove('loading');
     showQuote(result);
-    if(result){
+    // Only fill rates if we got actual quote data (not market-closed marker)
+    if(result && !result.marketClosed && typeof result.bid === 'number'){
       fillInitialRates(result);
     }
   }
