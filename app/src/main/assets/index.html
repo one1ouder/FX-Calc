@@ -398,11 +398,26 @@
         pending.reject(new Error('upstream status ' + payload.status));
         return;
       }
-      var row = payload.data.find(function(q){return q.name === 'USD/RUB_TOM'});
-      if(!row){
-        pending.reject(new Error('USD/RUB_TOM not in response'));
+      if(!payload.data || !Array.isArray(payload.data)){
+        pending.reject(new Error('no data array (got ' + typeof payload.data + ')'));
         return;
       }
+      var row = payload.data.find(function(q){return q && q.name === 'USD/RUB_TOM'});
+      if(!row){
+        var names = payload.data.map(function(q){return q && q.name}).join(',');
+        pending.reject(new Error('USD/RUB_TOM not found. Got: ' + names));
+        return;
+      }
+      // Validate fields
+      var bid = parseFloat(row.bid);
+      var ask = parseFloat(row.offer);
+      if(isNaN(bid) || isNaN(ask)){
+        pending.reject(new Error('invalid bid/offer: bid=' + row.bid + ' offer=' + row.offer));
+        return;
+      }
+      // Replace with parsed numbers so toFixed always works
+      row.bid = bid;
+      row.offer = ask;
       pending.resolve(row);
     } catch(e){
       pending.reject(e);
@@ -498,12 +513,21 @@
       g('liveTime').textContent = '';
       return;
     }
-    liveRow.classList.remove('error');
-    g('liveStatus').style.display = 'none';
-    g('liveQuote').style.display = '';
-    g('liveBid').textContent = result.bid.toFixed(4);
-    g('liveAsk').textContent = result.ask.toFixed(4);
-    g('liveTime').textContent = parseQuoteTime(result.quote_time);
+    try {
+      liveRow.classList.remove('error');
+      var bidStr = (typeof result.bid === 'number' ? result.bid.toFixed(4) : String(result.bid));
+      var askStr = (typeof result.ask === 'number' ? result.ask.toFixed(4) : String(result.ask));
+      g('liveStatus').style.display = 'none';
+      g('liveQuote').style.display = '';
+      g('liveBid').textContent = bidStr;
+      g('liveAsk').textContent = askStr;
+      g('liveTime').textContent = parseQuoteTime(result.quote_time);
+    } catch(e){
+      liveRow.classList.add('error');
+      g('liveStatus').style.display = '';
+      g('liveQuote').style.display = 'none';
+      g('liveStatus').textContent = 'render err: ' + (e.message||e);
+    }
   }
 
   // Click on bid/ask to populate USDRUB quote
