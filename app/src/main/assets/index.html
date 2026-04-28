@@ -70,7 +70,11 @@
 
   .live-row{background:rgba(52,199,89,0.08);border:1px solid rgba(52,199,89,0.25);border-radius:8px;padding:6px 8px;margin-bottom:6px;display:flex;align-items:center;gap:8px}
   .live-label{font-size:10px;color:var(--gn);font-weight:600;flex-shrink:0;text-transform:uppercase;letter-spacing:0.5px}
-  .live-quote{font-size:13px;font-weight:600;color:var(--t1);font-family:var(--m);letter-spacing:0.2px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .live-quote{font-size:13px;font-weight:600;color:var(--t1);font-family:var(--m);letter-spacing:0.2px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:2px}
+  .live-bid,.live-ask{cursor:pointer;-webkit-tap-highlight-color:transparent;padding:2px 5px;border-radius:4px;transition:background 0.15s;font-family:var(--m)}
+  .live-bid:active,.live-ask:active{background:rgba(52,199,89,0.3)}
+  .live-sep{color:var(--td);font-weight:400}
+  .live-status{font-size:13px;font-weight:600;color:var(--t1);font-family:var(--m);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .live-time{font-size:10px;color:var(--td);font-family:var(--m);flex-shrink:0}
   .live-refresh{display:flex;align-items:center;justify-content:center;width:24px;height:24px;background:var(--ibg);border:1px solid rgba(52,199,89,0.3);border-radius:5px;color:var(--gn);font-size:14px;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent;flex-shrink:0;padding:0;font-family:var(--s)}
   .live-refresh:active{background:var(--gn);color:var(--bg)}
@@ -78,7 +82,7 @@
   @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
   .live-row.error{background:rgba(255,69,58,0.08);border-color:rgba(255,69,58,0.25)}
   .live-row.error .live-label{color:var(--rd)}
-  .live-row.error .live-quote{color:var(--rd);font-size:10px;font-weight:500}
+  .live-row.error .live-status{color:var(--rd);font-size:10px;font-weight:500}
 
   .save-panel{display:none;background:var(--card);border-radius:10px;padding:10px;border:1px solid var(--dv)}
   .save-panel.show{display:block}
@@ -122,7 +126,7 @@
 <body>
 
 <div class="bar">
-  <div class="bar-l"><span class="bar-t"><span class="bar-i">FX</span>Calculator<span class="bar-v">v.2.0</span></span></div>
+  <div class="bar-l"><span class="bar-t"><span class="bar-i">FX</span>Calculator<span class="bar-v">v.2.1</span></span></div>
   <div class="bar-btns">
     <button class="bar-btn" id="solveBtn" onclick="toggleSolve()">SOLVE</button>
     <button class="bar-btn" id="saveBtn" onclick="toggleSave()">SAVE</button>
@@ -136,7 +140,12 @@
 
     <div class="live-row" id="liveRow">
       <span class="live-label">USD/RUB_TOM</span>
-      <span class="live-quote" id="liveQuote">loading…</span>
+      <span class="live-status" id="liveStatus">loading…</span>
+      <span class="live-quote" id="liveQuote" style="display:none">
+        <span class="live-bid" id="liveBid" onclick="useQuote('bid')"></span>
+        <span class="live-sep">/</span>
+        <span class="live-ask" id="liveAsk" onclick="useQuote('ask')"></span>
+      </span>
       <span class="live-time" id="liveTime"></span>
       <button class="live-refresh" id="liveRefresh" onclick="refreshQuote()" title="Refresh">↻</button>
     </div>
@@ -161,7 +170,7 @@
     <div class="sh"><div class="sd"></div><span class="st">Conversion</span></div>
     <div class="fr">
       <div class="lc"><span class="lb">RUB amt</span></div>
-      <div class="ic"><div class="iw"><input id="rub" type="text" inputmode="decimal" value="8 000 000" placeholder="0"></div></div>
+      <div class="ic"><div class="iw"><input id="rub" type="text" inputmode="decimal" value="10 000 000" placeholder="0"></div></div>
     </div>
     <div class="fr">
       <div class="lc"><span class="lb">USD amt</span></div>
@@ -181,7 +190,7 @@
         <div class="cost-row">
           <div class="iw"><input id="cost1" type="text" inputmode="decimal" value="0.30%" placeholder="0.00%"></div>
           <span class="cost-plus">+</span>
-          <div class="iw"><input id="cost2" type="text" inputmode="decimal" value="0.10%" placeholder="0.00%"></div>
+          <div class="iw"><input id="cost2" type="text" inputmode="decimal" value="" placeholder="0.00%"></div>
         </div>
       </div>
     </div>
@@ -342,10 +351,19 @@
     var tmpEl=g('totalMuPct');tmpEl.textContent=fp(totalMuPct);setPctColor(tmpEl,totalMuPct)
   }
 
-  // ---- LIVE QUOTE FETCH ----
+  // ---- LIVE QUOTE FETCH (async) ----
   window.fxBid = null;
   window.fxAsk = null;
   window.lastFetchError = null;
+
+  // Track in-flight requests so late deliveries don't override newer results
+  var pendingRequests = {};
+  var requestCounter = 0;
+  var currentRequestId = null;
+
+  function makeRequestId(){
+    return 'req_' + (++requestCounter) + '_' + Date.now();
+  }
 
   function parseQuoteTime(iso){
     try {
@@ -360,63 +378,88 @@
     } catch(e){ return ''; }
   }
 
-  async function fetchUsdRubDirect(){
-    var res = await fetch("https://ntprogress.ru/local_api/public/east/", { cache: "no-store" });
-    if(!res.ok) throw new Error("HTTP "+res.status);
-    var payload = await res.json();
-    if(payload.status !== "ok") throw new Error("upstream status "+payload.status);
-    var row = payload.data.find(function(q){return q.name === "USD/RUB_TOM"});
-    if(!row) throw new Error("USD/RUB_TOM not in response");
-    return row;
-  }
+  // Native bridge delivers async result here
+  window.onQuoteResult = function(requestId, jsonString){
+    var pending = pendingRequests[requestId];
+    if(!pending){
+      console.warn('onQuoteResult: no pending request for', requestId);
+      return;
+    }
+    delete pendingRequests[requestId];
+    if(pending.timer) clearTimeout(pending.timer);
+
+    try {
+      var payload = JSON.parse(jsonString);
+      if(payload.error){
+        pending.reject(new Error(payload.error));
+        return;
+      }
+      if(payload.status !== 'ok'){
+        pending.reject(new Error('upstream status ' + payload.status));
+        return;
+      }
+      var row = payload.data.find(function(q){return q.name === 'USD/RUB_TOM'});
+      if(!row){
+        pending.reject(new Error('USD/RUB_TOM not in response'));
+        return;
+      }
+      pending.resolve(row);
+    } catch(e){
+      pending.reject(e);
+    }
+  };
 
   function fetchUsdRubBridge(){
     return new Promise(function(resolve, reject){
+      if(!window.Android || !window.Android.fetchQuoteAsync){
+        reject(new Error('async bridge not available'));
+        return;
+      }
+      var requestId = makeRequestId();
+      currentRequestId = requestId;
+      pendingRequests[requestId] = {
+        resolve: resolve,
+        reject: reject,
+        timer: setTimeout(function(){
+          if(pendingRequests[requestId]){
+            delete pendingRequests[requestId];
+            reject(new Error('JS timeout (12s)'));
+          }
+        }, 12000)
+      };
       try {
-        if(!window.Android || !window.Android.fetchQuote){
-          reject(new Error("no bridge"));
-          return;
-        }
-        var result = window.Android.fetchQuote();
-        if(!result){
-          reject(new Error("bridge returned null"));
-          return;
-        }
-        var payload = JSON.parse(result);
-        if(payload.error){
-          reject(new Error(payload.error));
-          return;
-        }
-        if(payload.status !== "ok"){
-          reject(new Error("upstream status "+payload.status));
-          return;
-        }
-        var row = payload.data.find(function(q){return q.name === "USD/RUB_TOM"});
-        if(!row){
-          reject(new Error("USD/RUB_TOM not in response"));
-          return;
-        }
-        resolve(row);
+        window.Android.fetchQuoteAsync(requestId);
       } catch(e){
+        delete pendingRequests[requestId];
         reject(e);
       }
     });
+  }
+
+  async function fetchUsdRubDirect(){
+    var res = await fetch('https://ntprogress.ru/local_api/public/east/', { cache: 'no-store' });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    var payload = await res.json();
+    if(payload.status !== 'ok') throw new Error('upstream status ' + payload.status);
+    var row = payload.data.find(function(q){return q.name === 'USD/RUB_TOM'});
+    if(!row) throw new Error('USD/RUB_TOM not in response');
+    return row;
   }
 
   window.fetchUsdRub = async function(){
     var errors = [];
     try {
       var row;
-      if(window.Android && window.Android.fetchQuote){
+      if(window.Android && window.Android.fetchQuoteAsync){
         try {
           row = await fetchUsdRubBridge();
         } catch(e){
-          errors.push("bridge: "+(e.message||e));
+          errors.push('bridge: ' + (e.message||e));
           try {
             row = await fetchUsdRubDirect();
           } catch(e2){
-            errors.push("direct: "+(e2.message||e2));
-            throw new Error(errors.join(" | "));
+            errors.push('direct: ' + (e2.message||e2));
+            throw new Error(errors.join(' | '));
           }
         }
       } else {
@@ -431,12 +474,12 @@
         bid: row.bid,
         ask: row.offer,
         mid: (row.bid + row.offer) / 2,
-        settlement: "TOM",
+        settlement: 'TOM',
         quote_time: row.creationDateTime,
         fetch_time: new Date().toISOString()
       };
     } catch(e){
-      console.error("fetchUsdRub failed:", e);
+      console.error('fetchUsdRub failed:', e);
       window.lastFetchError = e.message || String(e);
       return null;
     }
@@ -446,17 +489,30 @@
     var liveRow = g('liveRow');
     if(!result){
       liveRow.classList.add('error');
-      var errMsg = window.lastFetchError ? ('fail: '+window.lastFetchError) : 'fetch failed';
-      if(errMsg.length > 80) errMsg = errMsg.substring(0,77)+'...';
-      g('liveQuote').textContent = errMsg;
-      g('liveQuote').title = window.lastFetchError || '';
+      var errMsg = window.lastFetchError ? ('fail: ' + window.lastFetchError) : 'fetch failed';
+      if(errMsg.length > 80) errMsg = errMsg.substring(0,77) + '...';
+      g('liveStatus').style.display = '';
+      g('liveQuote').style.display = 'none';
+      g('liveStatus').textContent = errMsg;
+      g('liveStatus').title = window.lastFetchError || '';
       g('liveTime').textContent = '';
       return;
     }
     liveRow.classList.remove('error');
-    g('liveQuote').textContent = result.bid.toFixed(4) + ' / ' + result.ask.toFixed(4);
+    g('liveStatus').style.display = 'none';
+    g('liveQuote').style.display = '';
+    g('liveBid').textContent = result.bid.toFixed(4);
+    g('liveAsk').textContent = result.ask.toFixed(4);
     g('liveTime').textContent = parseQuoteTime(result.quote_time);
   }
+
+  // Click on bid/ask to populate USDRUB quote
+  window.useQuote = function(which){
+    var v = which === 'bid' ? window.fxBid : window.fxAsk;
+    if(v === null || v === undefined) return;
+    g('q').value = v.toFixed(4);
+    calc('q');
+  };
 
   function fillInitialRates(result){
     if(!result) return;
@@ -473,6 +529,10 @@
   window.refreshQuote = async function(){
     var btn = g('liveRefresh');
     btn.classList.add('loading');
+    g('liveStatus').textContent = 'loading…';
+    g('liveStatus').style.display = '';
+    g('liveQuote').style.display = 'none';
+    g('liveTime').textContent = '';
     var result = await window.fetchUsdRub();
     btn.classList.remove('loading');
     showQuote(result);
@@ -541,7 +601,7 @@
     if(d.mu)g('mu').value=d.mu;
     if(d.rub)g('rub').value=d.rub;
     if(d.cost1)g('cost1').value=d.cost1;
-    if(d.cost2)g('cost2').value=d.cost2;
+    if(d.cost2 !== undefined)g('cost2').value=d.cost2;
     formatRub();
 
     if(d.usd !== undefined){

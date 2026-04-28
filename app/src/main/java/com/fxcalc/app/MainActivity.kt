@@ -17,6 +17,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
 
@@ -39,7 +40,7 @@ class MainActivity : AppCompatActivity() {
             webViewClient = WebViewClient()
         }
 
-        webView.addJavascriptInterface(CalcBridge(dbHelper, this), "Android")
+        webView.addJavascriptInterface(CalcBridge(dbHelper, this, webView), "Android")
         setContentView(webView)
         webView.loadUrl("file:///android_asset/index.html")
     }
@@ -81,11 +82,19 @@ class MainActivity : AppCompatActivity() {
     }
 }
 
-class CalcBridge(private val db: CalcDatabaseHelper, private val activity: MainActivity) {
+class CalcBridge(
+    private val db: CalcDatabaseHelper,
+    private val activity: MainActivity,
+    private val webView: WebView
+) {
 
     companion object {
         private const val TAG = "FXCalcBridge"
+        private const val FETCH_URL = "https://ntprogress.ru/local_api/public/east"
+        private const val HARD_TIMEOUT_MS = 10_000L
     }
+
+    private val executor = Executors.newSingleThreadExecutor()
 
     @JavascriptInterface
     fun saveCalc(name: String, data: String): Boolean {
@@ -138,63 +147,146 @@ class CalcBridge(private val db: CalcDatabaseHelper, private val activity: MainA
         }
     }
 
+    /**
+     * Async fetch: returns immediately, then delivers result to JS via window.onQuoteResult(jsonString).
+     * Uses a background thread with a hard timeout that interrupts the request if it hangs.
+     */
     @JavascriptInterface
-    fun fetchQuote(): String {
-        // Endpoint redirects from /east/ to /east — call the final URL directly
-        return doFetch("https://ntprogress.ru/local_api/public/east")
+    fun fetchQuoteAsync(requestId: String) {
+        Log.d(TAG, "fetchQuoteAsync: starting requestId=$requestId")
+
+        val worker = Thread {
+            val result = doFetch()
+            Log.d(TAG, "fetchQuoteAsync: worker returning result for $requestId")
+            deliverResult(requestId, result)
+        }
+        worker.name = "FXCalc-fetch-$requestId"
+        worker.isDaemon = true
+        worker.start()
+
+        // Hard-timeout watchdog on a separate thread
+        executor.submit {
+            try {
+                worker.join(HARD_TIMEOUT_MS)
+                if (worker.isAlive) {
+                    Log.w(TAG, "fetchQuoteAsync: hard timeout, interrupting worker for $requestId")
+                    worker.interrupt()
+                    // Give it a moment to die
+                    Thread.sleep(200)
+                    if (worker.isAlive) {
+                        @Suppress("DEPRECATION")
+                        try { worker.stop() } catch (_: Throwable) {}
+                    }
+                    deliverResult(requestId, """{"error":"timeout (${HARD_TIMEOUT_MS}ms)"}""")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "watchdog error", e)
+            }
+        }
     }
 
-    private fun doFetch(urlString: String): String {
+    private fun doFetch(): String {
         val startTime = System.currentTimeMillis()
         var conn: HttpURLConnection? = null
         try {
-            Log.d(TAG, "fetchQuote: starting request to $urlString")
-            val url = URL(urlString)
+            Log.d(TAG, "doFetch: connecting to $FETCH_URL")
+            val url = URL(FETCH_URL)
             conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 8000
-                readTimeout = 8000
+                connectTimeout = 7000
+                readTimeout = 7000
                 instanceFollowRedirects = true
                 useCaches = false
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Cache-Control", "no-cache")
-                setRequestProperty("User-Agent", "FXCalculator/2.0 (Android)")
+                setRequestProperty("User-Agent", "FXCalculator/2.1 (Android)")
                 setRequestProperty("Connection", "close")
             }
 
             val code = conn.responseCode
             val elapsed = System.currentTimeMillis() - startTime
-            Log.d(TAG, "fetchQuote: response code $code in ${elapsed}ms")
+            Log.d(TAG, "doFetch: HTTP $code in ${elapsed}ms")
 
-            // Handle redirects manually if instanceFollowRedirects didn't work
             if (code in 300..399) {
                 val location = conn.getHeaderField("Location")
-                if (location != null && location != urlString) {
-                    Log.d(TAG, "fetchQuote: following redirect to $location")
+                if (location != null) {
+                    Log.d(TAG, "doFetch: redirect to $location")
                     conn.disconnect()
-                    return doFetch(location)
+                    val redirUrl = URL(location)
+                    val redirConn = (redirUrl.openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 7000
+                        readTimeout = 7000
+                        useCaches = false
+                        setRequestProperty("Accept", "application/json")
+                        setRequestProperty("User-Agent", "FXCalculator/2.1 (Android)")
+                        setRequestProperty("Connection", "close")
+                    }
+                    val redirCode = redirConn.responseCode
+                    if (redirCode != 200) {
+                        redirConn.disconnect()
+                        return """{"error":"HTTP $redirCode after redirect"}"""
+                    }
+                    val redirBody = redirConn.inputStream.bufferedReader().use { it.readText() }
+                    redirConn.disconnect()
+                    return redirBody
                 }
             }
 
             if (code != 200) {
-                val errBody = try {
-                    conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
-                } catch (e: Exception) { "" }
-                Log.e(TAG, "fetchQuote: HTTP $code — $errBody")
+                Log.e(TAG, "doFetch: HTTP $code")
                 return """{"error":"HTTP $code"}"""
             }
 
             val body = conn.inputStream.bufferedReader().use { it.readText() }
-            val totalElapsed = System.currentTimeMillis() - startTime
-            Log.d(TAG, "fetchQuote: ${body.length} bytes received in ${totalElapsed}ms total")
+            val total = System.currentTimeMillis() - startTime
+            Log.d(TAG, "doFetch: ${body.length} bytes in ${total}ms")
             return body
+        } catch (e: InterruptedException) {
+            Log.w(TAG, "doFetch: interrupted")
+            return """{"error":"interrupted"}"""
         } catch (e: Exception) {
             val elapsed = System.currentTimeMillis() - startTime
-            Log.e(TAG, "fetchQuote: failed after ${elapsed}ms — ${e.javaClass.simpleName}: ${e.message}", e)
-            val msg = "${e.javaClass.simpleName}: ${e.message ?: "unknown"}".replace("\"", "'")
+            Log.e(TAG, "doFetch: failed after ${elapsed}ms", e)
+            val msg = "${e.javaClass.simpleName}: ${e.message ?: "unknown"}".replace("\"", "'").replace("\n", " ")
             return """{"error":"$msg"}"""
         } finally {
             try { conn?.disconnect() } catch (_: Exception) {}
         }
+    }
+
+    private fun deliverResult(requestId: String, json: String) {
+        // Encode JSON as a JS string literal — simplest and safest is to JSON-quote it
+        val escaped = jsStringLiteral(json)
+        val safeId = jsStringLiteral(requestId)
+        val js = "if(window.onQuoteResult)window.onQuoteResult($safeId,$escaped);"
+        activity.runOnUiThread {
+            try {
+                webView.evaluateJavascript(js, null)
+            } catch (e: Exception) {
+                Log.e(TAG, "deliverResult: evaluateJavascript failed", e)
+            }
+        }
+    }
+
+    private fun jsStringLiteral(s: String): String {
+        val sb = StringBuilder(s.length + 16)
+        sb.append('"')
+        for (ch in s) {
+            when (ch) {
+                '\\' -> sb.append("\\\\")
+                '"' -> sb.append("\\\"")
+                '\n' -> sb.append("\\n")
+                '\r' -> sb.append("\\r")
+                '\t' -> sb.append("\\t")
+                '\b' -> sb.append("\\b")
+                '\u000C' -> sb.append("\\f")
+                '\u2028' -> sb.append("\\u2028")
+                '\u2029' -> sb.append("\\u2029")
+                else -> if (ch.code < 0x20) sb.append("\\u%04x".format(ch.code)) else sb.append(ch)
+            }
+        }
+        sb.append('"')
+        return sb.toString()
     }
 }
