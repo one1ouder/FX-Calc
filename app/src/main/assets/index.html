@@ -71,8 +71,8 @@
   .live-row{background:rgba(52,199,89,0.08);border:1px solid rgba(52,199,89,0.25);border-radius:8px;padding:6px 8px;margin-bottom:6px;display:flex;align-items:center;gap:8px}
   .live-label{font-size:10px;color:var(--gn);font-weight:600;flex-shrink:0;text-transform:uppercase;letter-spacing:0.5px}
   .live-quote{font-size:13px;font-weight:600;color:var(--t1);font-family:var(--m);letter-spacing:0.2px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:2px}
-  .live-bid,.live-ask{cursor:pointer;-webkit-tap-highlight-color:transparent;padding:2px 5px;border-radius:4px;transition:background 0.15s;font-family:var(--m)}
-  .live-bid:active,.live-ask:active{background:rgba(52,199,89,0.3)}
+  .live-bid,.live-ask{cursor:pointer;-webkit-tap-highlight-color:transparent;background:rgba(52,199,89,0.12);padding:2px 6px;border-radius:4px;border:0.5px solid rgba(52,199,89,0.25);transition:background 0.15s;font-family:var(--m)}
+  .live-bid:active,.live-ask:active{background:rgba(52,199,89,0.35)}
   .live-sep{color:var(--td);font-weight:400}
   .live-status{font-size:13px;font-weight:600;color:var(--t1);font-family:var(--m);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .live-time{font-size:10px;color:var(--td);font-family:var(--m);flex-shrink:0}
@@ -83,10 +83,22 @@
   .live-row.error{background:rgba(255,69,58,0.08);border-color:rgba(255,69,58,0.25)}
   .live-row.error .live-label{color:var(--rd)}
   .live-row.error .live-status{color:var(--rd);font-size:10px;font-weight:500}
-
   .live-row.market-closed{background:rgba(232,162,58,0.08);border-color:rgba(232,162,58,0.3)}
   .live-row.market-closed .live-label{color:var(--am)}
   .live-row.market-closed .live-status{color:var(--am);font-size:11px;font-weight:600}
+
+  /* Clickable label pill (e.g. "USDRUB quote" label) */
+  .lb-clickable{
+    background:rgba(232,162,58,0.12);
+    padding:2px 6px;
+    border-radius:4px;
+    border:0.5px solid rgba(232,162,58,0.25);
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+    display:inline-block;
+    transition:background 0.15s;
+  }
+  .lb-clickable:active{background:rgba(232,162,58,0.35)}
 
   .save-panel{display:none;background:var(--card);border-radius:10px;padding:10px;border:1px solid var(--dv)}
   .save-panel.show{display:block}
@@ -130,7 +142,7 @@
 <body>
 
 <div class="bar">
-  <div class="bar-l"><span class="bar-t"><span class="bar-i">FX</span>Calculator<span class="bar-v">v.2.1</span></span></div>
+  <div class="bar-l"><span class="bar-t"><span class="bar-i">FX</span>Calculator<span class="bar-v">v.2.2</span></span></div>
   <div class="bar-btns">
     <button class="bar-btn" id="solveBtn" onclick="toggleSolve()">SOLVE</button>
     <button class="bar-btn" id="saveBtn" onclick="toggleSave()">SAVE</button>
@@ -155,11 +167,11 @@
     </div>
 
     <div class="fr">
-      <div class="lc"><span class="lb">USDRUB fw</span></div>
+      <div class="lc"><span class="lb">USDRUB mkt</span></div>
       <div class="ic"><div class="iw"><input id="fw" type="text" inputmode="decimal" value="" placeholder="0.00"></div></div>
     </div>
     <div class="fr">
-      <div class="lc"><span class="lb">USDRUB quote</span></div>
+      <div class="lc"><span class="lb lb-clickable" onclick="applyQuotePct()">USDRUB quote</span></div>
       <div class="ic"><div class="iw"><input id="q" type="text" inputmode="decimal" value="" placeholder="0.00"></div></div>
       <div class="rc"><div class="iw iw-pct"><input id="pctQF" type="text" inputmode="decimal" placeholder="0.00%"></div></div>
     </div>
@@ -205,8 +217,14 @@
     <div class="dv"></div>
     <div class="fr" id="clientRow">
       <div class="lc"><span class="lb">USDRUB client</span><span class="solve-tag" id="clientSolveTag" style="display:none">target</span></div>
-      <div class="ic"><div class="cw" id="clientWrapCalc"><span id="clientRate" class="cv"></span></div><div class="iw" id="clientWrapInput" style="display:none"><input id="clientInput" type="text" inputmode="decimal" placeholder="0.00"></div></div>
-      <div class="rc"><div class="cw cw-pct"><span id="clientPct" class="cv"></span></div></div>
+      <div class="ic">
+        <div class="cw" id="clientWrapCalc"><span id="clientRate" class="cv"></span></div>
+        <div class="iw" id="clientWrapInput" style="display:none"><input id="clientInput" type="text" inputmode="decimal" placeholder="0.00"></div>
+      </div>
+      <div class="rc">
+        <div class="cw cw-pct" id="clientPctWrapCalc"><span id="clientPct" class="cv"></span></div>
+        <div class="iw iw-pct" id="clientPctWrapInput" style="display:none"><input id="clientPctInput" type="text" inputmode="decimal" placeholder="0.00%"></div>
+      </div>
     </div>
     <div class="fr">
       <div class="lc"><span class="lb">Total MU RUB</span></div>
@@ -231,13 +249,13 @@
 
   <div class="fc">
     <span class="fct">Formulas</span>
-    <div class="frow"><span class="fl">Quote %</span><span class="fe">quote / fw - 1</span></div>
+    <div class="frow"><span class="fl">Quote %</span><span class="fe">quote / mkt - 1</span></div>
     <div class="frow"><span class="fl">MU %</span><span class="fe">mu / quote - 1</span></div>
     <div class="frow"><span class="fl">USD amt</span><span class="fe">RUB / mu</span></div>
     <div class="frow"><span class="fl">MU RUB</span><span class="fe">RUB x mu%</span></div>
     <div class="frow"><span class="fl">USDT amt</span><span class="fe">USD x (1-(c1+c2))</span></div>
     <div class="frow"><span class="fl">USDRUB client</span><span class="fe">RUB / USDT</span></div>
-    <div class="frow"><span class="fl">Client %</span><span class="fe">client / fw - 1</span></div>
+    <div class="frow"><span class="fl">Client %</span><span class="fe">client / quote - 1</span></div>
     <div class="frow"><span class="fl">Total MU</span><span class="fe">MU+(USD x c2 x mu)</span></div>
     <div class="frow"><span class="fl">Total MU %</span><span class="fe">totalMU / RUB</span></div>
   </div>
@@ -294,11 +312,45 @@
     else el.style.color='var(--rd)'
   }
 
-  function reverseSolve(){
-    var clientTarget = pn(g('clientInput').value);
-    if(!clientTarget) return;
+  // Format a percent input field's value with % suffix
+  function formatPctField(el, v){
+    if(v === null || isNaN(v)){
+      el.value = '';
+    } else {
+      el.value = (v*100).toFixed(2) + '%';
+    }
+    setPctColor(el, v);
+  }
+
+  function reverseSolve(source){
+    // source: 'rate' (clientInput changed) or 'pct' (clientPctInput changed)
     var c1=pp(g('cost1').value);if(c1===null)c1=0;
     var c2=pp(g('cost2').value);if(c2===null)c2=0;
+    var q = pn(g('q').value);
+    var clientTarget;
+
+    if(source === 'pct'){
+      var pctVal = pp(g('clientPctInput').value);
+      if(pctVal === null || !q) return;
+      clientTarget = q * (1 + pctVal);
+      g('clientInput').value = clientTarget.toFixed(2);
+    } else {
+      clientTarget = pn(g('clientInput').value);
+      if(!clientTarget || !q){
+        // Update pct field even if q is 0
+        if(q && clientTarget){
+          var pct = clientTarget/q - 1;
+          g('clientPctInput').value = fp(pct);
+          setPctColor(g('clientPctInput'), pct);
+        }
+        return;
+      }
+      var pct = clientTarget/q - 1;
+      g('clientPctInput').value = fp(pct);
+      setPctColor(g('clientPctInput'), pct);
+    }
+
+    if(!clientTarget) return;
     var muSolved = clientTarget * (1-(c1+c2));
     g('mu').value = muSolved.toFixed(2);
     calc('solve');
@@ -314,8 +366,7 @@
     }else{
       q=pn(g('q').value);
       var qf=fw?(q/fw-1):null;
-      g('pctQF').value=fp(qf);
-      setPctColor(g('pctQF'),qf)
+      formatPctField(g('pctQF'), qf);
     }
 
     if(src==='pctMQ'){
@@ -325,8 +376,7 @@
     }else{
       mu=pn(g('mu').value);
       var mq=q?(mu/q-1):null;
-      g('pctMQ').value=fp(mq);
-      setPctColor(g('pctMQ'),mq)
+      formatPctField(g('pctMQ'), mq);
     }
 
     if(src!=='pctQF'){var qfc=fw?(q/fw-1):null;setPctColor(g('pctQF'),qfc)}
@@ -341,7 +391,8 @@
     var muRub=mqVal!==null?(rub*mqVal):null;
     var usdtAmt=usdAmt!==null?(usdAmt*(1-(c1+c2))):null;
     var clientRate=(usdtAmt&&usdtAmt!==0)?(rub/usdtAmt):null;
-    var clientPct=(clientRate!==null&&fw)?(clientRate/fw-1):null;
+    // Client % is now relative to quote (was relative to fw/mkt)
+    var clientPct=(clientRate!==null&&q)?(clientRate/q-1):null;
     var totalMu=(muRub!==null&&usdAmt!==null)?(muRub+(usdAmt*c2)*mu):null;
     var totalMuPct=(totalMu!==null&&rub)?(totalMu/rub):null;
 
@@ -352,7 +403,17 @@
     g('totalMu').textContent=fn(totalMu,2);
 
     var cpEl=g('clientPct');cpEl.textContent=fp(clientPct);setPctColor(cpEl,clientPct);
-    var tmpEl=g('totalMuPct');tmpEl.textContent=fp(totalMuPct);setPctColor(tmpEl,totalMuPct)
+    var tmpEl=g('totalMuPct');tmpEl.textContent=fp(totalMuPct);setPctColor(tmpEl,totalMuPct);
+
+    // In solve mode, keep the pct input synced when solve was triggered from rate
+    if(solveMode && src !== 'solvePct' && clientRate !== null && q){
+      var solvePctVal = clientRate/q - 1;
+      var pctInputEl = g('clientPctInput');
+      if(document.activeElement !== pctInputEl){
+        pctInputEl.value = fp(solvePctVal);
+        setPctColor(pctInputEl, solvePctVal);
+      }
+    }
   }
 
   // ---- LIVE QUOTE FETCH (async) ----
@@ -360,10 +421,8 @@
   window.fxAsk = null;
   window.lastFetchError = null;
 
-  // Track in-flight requests so late deliveries don't override newer results
   var pendingRequests = {};
   var requestCounter = 0;
-  var currentRequestId = null;
 
   function makeRequestId(){
     return 'req_' + (++requestCounter) + '_' + Date.now();
@@ -382,7 +441,6 @@
     } catch(e){ return ''; }
   }
 
-  // Native bridge delivers async result here
   window.onQuoteResult = function(requestId, jsonString){
     var pending = pendingRequests[requestId];
     if(!pending){
@@ -415,7 +473,6 @@
         pending.resolve({ marketClosed: true, reason: 'USD/RUB_TOM not listed' });
         return;
       }
-      // Check for missing fields (market closed scenario)
       if(row.bid === undefined || row.bid === null || row.offer === undefined || row.offer === null){
         pending.resolve({ marketClosed: true, reason: 'market closed', quote_time: row.creationDateTime });
         return;
@@ -441,7 +498,6 @@
         return;
       }
       var requestId = makeRequestId();
-      currentRequestId = requestId;
       pendingRequests[requestId] = {
         resolve: resolve,
         reject: reject,
@@ -466,8 +522,21 @@
     if(!res.ok) throw new Error('HTTP ' + res.status);
     var payload = await res.json();
     if(payload.status !== 'ok') throw new Error('upstream status ' + payload.status);
-    var row = payload.data.find(function(q){return q.name === 'USD/RUB_TOM'});
-    if(!row) throw new Error('USD/RUB_TOM not in response');
+    if(!payload.data || !Array.isArray(payload.data) || payload.data.length === 0){
+      return { marketClosed: true, reason: 'no quotes available' };
+    }
+    var row = payload.data.find(function(q){return q && q.name === 'USD/RUB_TOM'});
+    if(!row) return { marketClosed: true, reason: 'USD/RUB_TOM not listed' };
+    if(row.bid === undefined || row.bid === null || row.offer === undefined || row.offer === null){
+      return { marketClosed: true, reason: 'market closed', quote_time: row.creationDateTime };
+    }
+    var bid = parseFloat(row.bid);
+    var ask = parseFloat(row.offer);
+    if(isNaN(bid) || isNaN(ask) || bid === 0 || ask === 0){
+      return { marketClosed: true, reason: 'market closed', quote_time: row.creationDateTime };
+    }
+    row.bid = bid;
+    row.offer = ask;
     return row;
   }
 
@@ -491,7 +560,6 @@
         row = await fetchUsdRubDirect();
       }
 
-      // Pass through market-closed marker
       if(row && row.marketClosed){
         window.fxBid = null;
         window.fxAsk = null;
@@ -559,11 +627,22 @@
     }
   }
 
-  // Click on bid/ask to populate USDRUB quote
+  // Click bid/ask → fill USDRUB mkt (was: USDRUB quote)
   window.useQuote = function(which){
     var v = which === 'bid' ? window.fxBid : window.fxAsk;
     if(v === null || v === undefined) return;
-    g('q').value = v.toFixed(4);
+    g('fw').value = v.toFixed(4);
+    calc('fw');
+  };
+
+  // Click "USDRUB quote" label → quote = mkt × (1 + pctQF). If pct empty, quote = mkt.
+  window.applyQuotePct = function(){
+    var mkt = pn(g('fw').value);
+    if(!mkt) return;
+    var pct = pp(g('pctQF').value);
+    if(pct === null) pct = 0;
+    var qVal = mkt * (1 + pct);
+    g('q').value = qVal.toFixed(4);
     calc('q');
   };
 
@@ -597,7 +676,6 @@
     var result = await window.fetchUsdRub();
     btn.classList.remove('loading');
     showQuote(result);
-    // Only fill rates if we got actual quote data (not market-closed marker)
     if(result && !result.marketClosed && typeof result.bid === 'number'){
       fillInitialRates(result);
     }
@@ -608,14 +686,22 @@
     g('solveBtn').classList.toggle('active', solveMode);
     g('clientWrapCalc').style.display = solveMode ? 'none' : 'flex';
     g('clientWrapInput').style.display = solveMode ? 'flex' : 'none';
+    g('clientPctWrapCalc').style.display = solveMode ? 'none' : 'flex';
+    g('clientPctWrapInput').style.display = solveMode ? 'flex' : 'none';
     g('clientSolveTag').style.display = solveMode ? 'inline' : 'none';
     g('muSolveTag').style.display = solveMode ? 'inline' : 'none';
     g('muWrap').classList.toggle('solve-result', solveMode);
     g('mu').readOnly = solveMode;
     g('pctMQ').readOnly = solveMode;
     if(solveMode){
-      var current = g('clientRate').textContent;
-      if(current && current !== '\u2014') g('clientInput').value = current;
+      // Pre-fill both client rate and client % inputs from current calculated values
+      var currentRate = g('clientRate').textContent;
+      if(currentRate && currentRate !== '\u2014') g('clientInput').value = currentRate;
+      var currentPct = g('clientPct').textContent;
+      if(currentPct && currentPct !== '\u2014'){
+        g('clientPctInput').value = currentPct;
+        setPctColor(g('clientPctInput'), pp(currentPct));
+      }
     } else {
       calc('mu');
     }
@@ -678,6 +764,10 @@
 
       if(solveMode && d.clientRate && d.clientRate !== '\u2014'){
         g('clientInput').value=d.clientRate;
+        if(d.clientPct){
+          g('clientPctInput').value = d.clientPct;
+          setPctColor(g('clientPctInput'), pp(d.clientPct));
+        }
       }
     } else {
       calc('init');
@@ -914,7 +1004,41 @@
     }
   };
 
+  // ---- Percentage field formatting (Bug #4 fix) ----
+  // Strip % on focus so user can type freely; reformat with % on blur.
+  function setupPctField(id){
+    var el = g(id);
+    el.addEventListener('focus', function(){
+      // Strip % suffix to allow easy editing
+      var v = this.value;
+      if(v.indexOf('%') !== -1){
+        this.value = v.replace('%','').trim();
+      }
+      var self = this;
+      setTimeout(function(){self.select()}, 0);
+    });
+    el.addEventListener('blur', function(){
+      var v = this.value.trim();
+      if(!v) return;
+      // Re-add % if missing
+      if(v.indexOf('%') === -1){
+        var num = parseFloat(v.replace(',','.'));
+        if(!isNaN(num)){
+          this.value = num.toFixed(2) + '%';
+        }
+      }
+    });
+  }
+
+  setupPctField('pctQF');
+  setupPctField('pctMQ');
+  setupPctField('cost1');
+  setupPctField('cost2');
+  setupPctField('clientPctInput');
+
+  // Auto-select on focus for non-pct inputs
   document.querySelectorAll('.iw input').forEach(function(el){
+    if(['pctQF','pctMQ','cost1','cost2','clientPctInput'].indexOf(el.id) !== -1) return;
     el.addEventListener('focus',function(){
       var self=this;setTimeout(function(){self.select()},0)
     })
@@ -928,15 +1052,19 @@
   g('rub').addEventListener('input',function(){formatRub();calc('rub')});
 
   g('clientInput').addEventListener('input',function(){
-    if(solveMode) reverseSolve();
+    if(solveMode) reverseSolve('rate');
   });
   g('clientInput').addEventListener('focus',function(){
     var self=this;setTimeout(function(){self.select()},0)
   });
 
+  g('clientPctInput').addEventListener('input',function(){
+    if(solveMode) reverseSolve('pct');
+  });
+
   ['cost1','cost2'].forEach(function(id){
     g(id).addEventListener('input',function(){
-      if(solveMode) reverseSolve();
+      if(solveMode) reverseSolve('rate');
     })
   });
 
